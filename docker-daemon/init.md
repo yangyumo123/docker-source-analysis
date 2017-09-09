@@ -216,7 +216,9 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
 
 ## 其他参数
 //github.com/docker/docker/cmd/dockerd/docker.go
+
 var flHelp    = flag.Bool([]string{"h", "-help"}, false, "Print usage")
+
 var flVersion = flag.Bool([]string{"v", "-version"}, false, "Print version information and quit")
 
 
