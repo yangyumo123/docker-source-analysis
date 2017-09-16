@@ -14,8 +14,11 @@ Linux内核namespace的相关知识
 |Mount|CLONE_NEWNS|挂载点（文件系统）|
 |User|CLONE_NEWUSER|用户和用户组|
 
+**补充**：还有一种namespace叫cgroups，它是在Linux内核4.6版本才出现，docker目前并未使用它。
 
-
+## 目录
+1. [Linux内核中的namesapce数据结构](./struct.md)
+2. [调用namespace的API](./api.md)
 
 
 _______________________________________________________________________
