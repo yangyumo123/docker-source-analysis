@@ -142,7 +142,7 @@ Linux内核中的namesapce数据结构
 ### 4. pid_namespace
 含义：
 
-    进程号的namespace隔离。
+    进程号的namespace隔离。内核为所有的pid namespace维护了一个树状结构，最顶层的称为root namespace，是系统初始化时创建的。
 
 路径：
 
@@ -158,7 +158,7 @@ Linux内核中的namesapce数据结构
         struct task_struct *child_reaper;
         struct kmem_cache *pid_cachep;
         unsigned int level;
-        struct pid_namespace *parent;
+        struct pid_namespace *parent;                     //父节点，pid namespace是一种树状结构。
     #ifdef CONFIG_PROC_FS
         struct vfsmount *proc_mnt;
         struct dentry *proc_self;

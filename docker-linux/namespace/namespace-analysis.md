@@ -169,7 +169,13 @@
 ## 3. pid namespace
 含义：
 
-    进程号隔离。
+    进程号隔离，即两个不同的namespace中的进程可以有相同的pid。内核为所有的pid namespace维护了一个树状结构，最顶层的是系统初始时创建的，称为root namespace。
+    创建的新的pid namespace称为child namespace（子节点），而原先的pid namespace称为parent namespace（父节点）。父节点可以看到子节点中的进程，并可以通过信号等方式对子节点中的进程产生影响。反过来，子节点不能看到父节点中的任何内容。
+    pid namespace具有以下特性：
+    * 每个pid namespace中的第一个进程的pid为1，就像Linux中的init进程一样拥有特权。
+    * 一个namespace中的进程，不可能通过kill或ptrace影响父节点或者兄弟节点中的进程，因为其他namespace中的pid在这个namespace中没有任何意义。
+    * 如果在新的pid namespace中重新挂载/proc文件系统，会发现其下只显示同属一个pid namespace中的其他进程。
+    * 在root namespace中可以看到所有的进程，并且递归包含所有子节点中的进程。其中一个应用是：在外部监控Docker中运行的进程，即监控Docker daemon所在的pid namespace下所有进程及其子进程。
 
 示例：
 
@@ -250,12 +256,42 @@
         5 root       0:00 /bin/ps
     / # 
 
-结论：从上面结果来看，新进程的pid namespace确实进行了隔离。
+结论：从上面结果来看，新进程的pid namespace确实进行了隔离。此外，与其他namespace不同的是，为了实现一个稳定安全的容器，pid namespace还需要进行一些额外的工作才能确保其中的进程顺利运行。
+
+（1）pid namespace中的init进程
+
+新创建pid namespace时，默认启动的进程pid为1，即init进程，特权进程。init进程为所有进程的父进程，维护一张进程表，不断检查进程的状态，一旦有某个子进程因为程序错误成为了“孤儿”进程，init就负责回收资源并介绍这个子进程。
+
+Docker启动时，第一个进程实现了进程监控和资源回收，它就是dockerinit。
+
+（2）信号与init进程
+
+内核为init进程赋予一个特权--信号屏蔽。如果init进程中没有写处理某个信号的代码逻辑，那么与init在同一个pid namespace中的进程（即使有超级权限）发送给该init进程的信号都会被屏蔽。这个作用是防止init进程被误杀。
+
+但是，父节点中的进程发送的信号中有2个信号：SIGKILL（销毁进程）或SIGSTOP（暂停进程）不会被屏蔽，其他信号同样会被屏蔽。如果父节点中的进程发送SIGKILL或SIGSTOP，子节点的init会强制执行（无法通过代码捕获进行处理）。
+
+一旦init进程被销毁，同一个pid namespace中的其他进程也会收到SIGKILL信号而被销毁。理论上，该pid namespace也会销毁，但是前面讲到，可以通过/proc/[pid]/ns/pid挂载的方式保留pid namespace。然而，保留下来的pid namespace无法通过setns()或clone()创建新进程，所以实际上没有什么用。这就是为什么Docker一旦启动就必须有进程在运行，不存在不包含任何进程的docker。
+
+（3）挂载proc文件系统
+
+前面实验已经说明了，重新挂载/proc文件系统，才能查看到pid号发生变化。
+
+（4）unshare和setns
+
+这两个API在pid namespace中有些需要注意的地方。
+
+unshare允许用户在原来进程中建立namespace进行隔离，但是创建了pid namespace后，原先unshare调用者进程并不进入新的pid namespace，接下来创建的子进程才会进入新的pid namespace中，这个子进程就是新的pid namespace中的init进程。
+
+setns也是一样，在创建pid namespace时，调用者进程不会进入新的pid namespace中，子进程才会进入。
+
+为什么创建其他namespace时unshare和setns的调用者会直接进入新的namespace中，而唯独pid namespace不是呢？因为调用getpid()函数得到的pid是根据调用者所在的pid namespace而决定返回哪个pid，进入新的pid namespace会导致pid产生变化。而进程的pid一般被当做常量看待，如果pid变化，则会引起进程崩溃。
+
+
 
 ### 4. mnt namespace
 含义：
 
-    文件系统隔离。
+    文件系统隔离。可以通过/proc/[pid]/mounts查看所有挂载在当前mnt namespace中的文件系统，还可以通过/proc/[pid]/mountstats查看mnt namespace中文件设备的统计信息等。
 
 示例：
 
@@ -305,6 +341,47 @@
     [root@localhost tmp]# ll /root/mygo/src/github.com/yangyumo123/demo/busybox/tmp     //宿主机看不到新进程挂载的文件，因此，mnt namespace进行了隔离。
     total 0
     [root@localhost tmp]# 
+
+深入分析：
+
+进程在创建mnt namespace时，会把当前的文件结构复制给新的mnt namespace。新mnt namespace中的所有mount操作都只影响自身的文件系统。这样做严格地实现了mnt隔离，但是某些情况可能并不适用。例如：父节点namespace中的进程挂载一张CD-ROM，这时子节点namespace拷贝的目录结构就无法自动挂载上这张CD-ROM，因为这种操作会影响到父节点的文件系统。
+
+2006年引入了挂载传播（mount propagation）解决了这个问题，挂载传播定义了挂载对象（mount object）之间的关系，系统用这些关系决定任何挂载对象中的挂载事件如何传播到其他挂载对象中。
+
+一个挂载状态可能有以下几种：
+
+    共享挂载（shared）
+    从属挂载（slave）
+    共享/从属挂载（shared and slave）
+    私有挂载（private）
+    不可绑定挂载（unbindable）
+
+传播事件的挂载对象称为共享挂载（例如，/lib）；接收传播事件的挂载对象称为从属挂载（例如，/bin。一般用于只读场景。从属挂载克隆的挂载对象也是从属挂载）；既不传播也不接收传播事件的挂载对象称为私有挂载（例如，/proc。默认所有挂载都是私有的）；不可绑定挂载（例如，/root）即不可以复制。
+
+设置共享挂载的命令：
+
+    # mount --make-shared <mount-object>
+
+设置从属挂载的命令：
+
+    # mount --make-slave <mount-object>
+
+将一个从属挂载对象设置为共享/从属挂载，命令：
+
+    # mount --make-shared <slave-mount-object>
+
+设置私有挂载的命令：
+
+    # mount --make-private <mount-object>
+
+设置不可绑定挂载的命令：
+
+    # mount --make-unbindable <mount-object>
+
+### 5. net namespace
+含义：
+
+示例：
 
 
 _______________________________________________________________________
