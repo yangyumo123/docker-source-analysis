@@ -6,7 +6,7 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
 ## 1. daemonCli
 含义：
 
-    创建一个默认值的daemon client，包含一些配置参数。
+    创建一个默认值的daemon client，包含一些配置参数。我们看编译linux的Config。
 
 路径：
 
@@ -42,7 +42,7 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
         //DaemonCli有3个重要参数：Config，commonFlags和configFile。
         return &DaemonCli{
             Config:      daemonConfig,
-            commonFlags: cliflags.InitCommonFlags(),
+            commonFlags: cliflags.InitCommonFlags(),  //下面详细介绍
             configFile:  configFile,
         }
     }
@@ -54,7 +54,7 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
 
 路径：
 
-    github.com/docker/docker/daemon/config_solaris.go
+    github.com/docker/docker/daemon/config_unix.go - linux下面编译
 
 定义：
 
@@ -63,6 +63,85 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
         config.InstallCommonFlags(cmd, usageFn)
 
         // 添加平台相关的flag参数到CommandLine中
+        //设置是否支持selinux，默认：false
+        cmd.BoolVar(&config.EnableSelinuxSupport, []string{"-selinux-enabled"}, false, usageFn("Enable selinux support"))
+
+        //设置socket组
+        cmd.StringVar(&config.SocketGroup, []string{"G", "-group"}, "docker", usageFn("Group for the unix socket"))
+
+        config.Ulimits = make(map[string]*units.Ulimit)
+
+        //容器默认的ulimit，ulimit是linux用于设置系统资源的。
+        cmd.Var(runconfigopts.NewUlimitOpt(&config.Ulimits), []string{"-default-ulimit"}, usageFn("Default ulimits for containers"))
+
+        //设置是否允许设置iptables规则，默认：true。
+        cmd.BoolVar(&config.bridgeConfig.EnableIPTables, []string{"#iptables", "-iptables"}, true, usageFn("Enable addition of iptables rules"))
+
+        //设置是否允许ip forward，默认：true。
+        cmd.BoolVar(&config.bridgeConfig.EnableIPForward, []string{"#ip-forward", "-ip-forward"}, true, usageFn("Enable net.ipv4.ip_forward"))
+
+        //设置是否允许ip masquerading，默认：true。
+        cmd.BoolVar(&config.bridgeConfig.EnableIPMasq, []string{"-ip-masq"}, true, usageFn("Enable IP masquerading"))
+
+        //设置是否允许ipv6，默认：false。
+        cmd.BoolVar(&config.bridgeConfig.EnableIPv6, []string{"-ipv6"}, false, usageFn("Enable IPv6 networking"))
+
+        //设置exec状态文件的根目录，默认：/var/run/docker
+        cmd.StringVar(&config.ExecRoot, []string{"-exec-root"}, defaultExecRoot, usageFn("Root directory for execution state files"))
+
+        //设置docker网桥地址
+        cmd.StringVar(&config.bridgeConfig.IP, []string{"#bip", "-bip"}, "", usageFn("Specify network bridge IP"))
+
+        //attach容器到docker网桥
+        cmd.StringVar(&config.bridgeConfig.Iface, []string{"b", "-bridge"}, "", usageFn("Attach containers to a network bridge"))
+
+        //固定的cidr作为ipv4的子网
+        cmd.StringVar(&config.bridgeConfig.FixedCIDR, []string{"-fixed-cidr"}, "", usageFn("IPv4 subnet for fixed IPs"))
+
+        //固定的cidr作为ipv6的子网
+        cmd.StringVar(&config.bridgeConfig.FixedCIDRv6, []string{"-fixed-cidr-v6"}, "", usageFn("IPv6 subnet for fixed IPs"))
+
+        //容器默认网关，对ipv4
+        cmd.Var(opts.NewIPOpt(&config.bridgeConfig.DefaultGatewayIPv4, ""), []string{"-default-gateway"}, usageFn("Container default gateway IPv4 address"))
+
+        //容器默认网关，对ipv6
+        cmd.Var(opts.NewIPOpt(&config.bridgeConfig.DefaultGatewayIPv6, ""), []string{"-default-gateway-v6"}, usageFn("Container default gateway IPv6 address"))
+
+        //设置是否允许容器间通信，默认：true
+        cmd.BoolVar(&config.bridgeConfig.InterContainerCommunication, []string{"#icc", "-icc"}, true, usageFn("Enable inter-container communication"))
+
+        //绑定容器port的默认ip，默认：0.0.0.0
+        cmd.Var(opts.NewIPOpt(&config.bridgeConfig.DefaultIP, "0.0.0.0"), []string{"#ip", "-ip"}, usageFn("Default IP when binding container ports"))
+
+        //设置是否允许回环地址的用户空间代理，默认：true
+        cmd.BoolVar(&config.bridgeConfig.EnableUserlandProxy, []string{"-userland-proxy"}, true, usageFn("Use userland proxy for loopback traffic"))
+
+        //废弃
+        cmd.BoolVar(&config.EnableCors, []string{"#api-enable-cors", "#-api-enable-cors"}, false, usageFn("Enable CORS headers in the remote API, this is deprecated by --api-cors-header"))
+
+        //设置所有容器的父cgroup
+        cmd.StringVar(&config.CgroupParent, []string{"-cgroup-parent"}, "", usageFn("Set parent cgroup for all containers"))
+
+        //用户空间的user/group
+        cmd.StringVar(&config.RemappedRoot, []string{"-userns-remap"}, "", usageFn("User/Group setting for user namespaces"))
+
+        //容器socket的路径
+        cmd.StringVar(&config.ContainerdAddr, []string{"-containerd"}, "", usageFn("Path to containerd socket"))
+
+        //当容器正在运行时，docker是否允许在线恢复，默认：false。
+        cmd.BoolVar(&config.LiveRestore, []string{"-live-restore"}, false, usageFn("Enable live restore of docker when containers are still running"))
+
+        config.Runtimes = make(map[string]types.Runtime)
+        //注册一个OCI兼容的runtime
+        cmd.Var(runconfigopts.NewNamedRuntimeOpt("runtimes", &config.Runtimes, stockRuntimeName), []string{"-add-runtime"}, usageFn("Register an additional OCI compatible runtime"))
+
+        //默认OCI runtime
+        cmd.StringVar(&config.DefaultRuntime, []string{"-default-runtime"}, stockRuntimeName, usageFn("Default OCI runtime for containers"))
+
+        //daemon的oom-score-adj
+        cmd.IntVar(&config.OOMScoreAdjust, []string{"-oom-score-adjust"}, -500, usageFn("Set the oom_score_adj for the daemon"))
+
+        //实验性，并无数据
         config.attachExperimentalFlags(cmd, usageFn)
     }
 
@@ -158,6 +237,7 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
         //不能连接旧版本registry。
         cmd.BoolVar(&options.V2Only, []string{"-disable-legacy-registry"}, false, usageFn("Disable contacting legacy registries"))
     }
+
 
 （2）InitCommonFlags
 含义：

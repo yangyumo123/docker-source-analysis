@@ -171,6 +171,7 @@ daemon启动的核心代码。
         //参数ServiceOptions前面已经介绍过了，是关于registry的参数。创建一个默认service对象，准备被安装到引擎中。
         registryService := registry.NewService(cli.Config.ServiceOptions)
 
+        //创建容器配置
         containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), cli.getPlatformRemoteOptions()...)
         if err != nil {
             return err
@@ -178,9 +179,10 @@ daemon启动的核心代码。
         cli.api = api
         signal.Trap(func() {
             cli.stop()
-            <-stopc // wait for daemonCli.start() to return
+            <-stopc //等着daemonCli.start() 返回
         })
 
+        //启动daemon，这里是创建docker daemon的核心程序。在下一章节详细介绍创建daemon的过程。
         d, err := daemon.NewDaemon(cli.Config, registryService, containerdRemote)
         if err != nil {
             return fmt.Errorf("Error starting daemon: %v", err)
@@ -375,21 +377,18 @@ daemon启动的核心代码。
             ServiceConfig: registrytypes.ServiceConfig{
                 InsecureRegistryCIDRs: make([]*registrytypes.NetIPNet, 0),
                 IndexConfigs:          make(map[string]*registrytypes.IndexInfo, 0),
-                // Hack: Bypass setting the mirrors to IndexConfigs since they are going away
-                // and Mirrors are only for the official registry anyways.
                 Mirrors: options.Mirrors,
             },
             V2Only: options.V2Only,
         }
-        // Split --insecure-registry into CIDR and registry-specific settings.
+        // 解析"--insecure-registry"到CIDR和registry指定的配置中。
         for _, r := range options.InsecureRegistries {
-            // Check if CIDR was passed to --insecure-registry
+            // 解析CIDR
             _, ipnet, err := net.ParseCIDR(r)
             if err == nil {
-                // Valid CIDR.
+                // 有效的CIDR
                 config.InsecureRegistryCIDRs = append(config.InsecureRegistryCIDRs, (*registrytypes.NetIPNet)(ipnet))
             } else {
-                // Assume `host:port` if not CIDR.
                 config.IndexConfigs[r] = &registrytypes.IndexInfo{
                     Name:     r,
                     Mirrors:  make([]string, 0),
@@ -399,7 +398,7 @@ daemon启动的核心代码。
             }
         }
 
-        // Configure public registry.
+        // 配置 public registry.
         config.IndexConfigs[IndexName] = &registrytypes.IndexInfo{
             Name:     IndexName,
             Mirrors:  config.Mirrors,
@@ -408,6 +407,195 @@ daemon启动的核心代码。
         }
 
         return config
+    }
+
+### 5. libcontainerd.New
+含义：
+
+    创建libcontainerd实例。
+
+路径：
+
+    github.com/docker/docker/libcontainerd/remote_linux.go
+
+参数：
+
+    cli.getLibcontainerdRoot()      - /var/run/docker/libcontainerd
+    cli.getPlatformRemoteOptions()  - libcontainer配置
+
+定义：
+
+    func New(stateDir string, options ...RemoteOption) (_ Remote, err error) {
+        defer func() {
+            if err != nil {
+                err = fmt.Errorf("Failed to connect to containerd. Please make sure containerd is installed in your PATH or you have specificed the correct address. Got error: %v", err)
+            }
+        }()
+
+        //创建remote
+        r := &remote{
+            stateDir:    stateDir,
+            daemonPid:   -1,
+            eventTsPath: filepath.Join(stateDir, eventTimestampFilename), // /var/run/docker/libcontainerd/event.ts
+        }
+        for _, option := range options {
+            if err := option.Apply(r); err != nil {   //传进来的参数要实现RemoteOptions接口的Apply(Remote)error方法。设置remote的参数，包括：rpcAddr, runtime, startDaemon, liveRestore, oomScore
+                return nil, err
+            }
+        }
+
+        //创建/var/run/docker/libecontainerd目录，0700
+        if err := sysinfo.MkdirAll(stateDir, 0700); err != nil {
+            return nil, err
+        }
+
+        //设置RPC地址：/var/run/docker/libcontainerd/docker-containerd.sock
+        if r.rpcAddr == "" {
+            r.rpcAddr = filepath.Join(stateDir, containerdSockFilename)
+        }
+
+        //如果设置了startDaemon=true，则运行容器daemon。那么什么时候会设置startDaemon=true呢？在github.com/docker/docker/cmd/dockerd/daemon_unix.go文件中的DaemonCli.getPlatformRemoteOptions方法中有一个判断：如果DaemonCli.Config.ContainerAddr为空时，则会设置startDaemon=true，即libcontainer也是以容器运行。在前面参数中已经提到Config.ContainerAddr参数默认为空，除非你通过命令行flag："--containerd"传入false值。正常情况下，不会运行容器的libcontainer，所以这里暂时不深入分析了。
+        if r.startDaemon {
+            if err := r.runContainerdDaemon(); err != nil {
+                return nil, err
+            }
+        }
+
+        // 不输出grpc重连日志。grpc是google的一个rpc框架
+        grpclog.SetLogger(log.New(ioutil.Discard, "", log.LstdFlags))
+        dialOpts := append([]grpc.DialOption{grpc.WithInsecure()},
+            grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+                return net.DialTimeout("unix", addr, timeout)
+            }),
+        )
+        //连接rpcAddr，返回连接
+        conn, err := grpc.Dial(r.rpcAddr, dialOpts...)
+        if err != nil {
+            return nil, fmt.Errorf("error connecting to containerd: %v", err)
+        }
+        //根据返回的连接创建客户端。
+        r.rpcConn = conn
+        r.apiClient = containerd.NewAPIClient(conn)
+
+        // 读/var/run/docker/event.ts文件中最后一个event的时间戳
+        t := r.getLastEventTimestamp()
+        //把时间戳转换为google protobuf时间戳格式
+        tsp, err := ptypes.TimestampProto(t)
+        if err != nil {
+            logrus.Errorf("libcontainerd: failed to convert timestamp: %q", err)
+        }
+        r.restoreFromTimestamp = tsp
+
+        //启动一个goroutine，
+        go r.handleConnectionChange()
+
+        //启动事件监控
+        if err := r.startEventsMonitor(); err != nil {
+            return nil, err
+        }
+
+        return r, nil
+    }
+
+（1）grpc
+
+这里主要介绍一下grpc的原理和在docker中的使用。
+
+GRPC是google开源的一个高性能RPC框架，基于HTTP2协议，基于protobuf 3.x（高性能数据传输格式），基于Netty 4.x+。从开发角度说，你需要做以下步骤（以java为例）：
+
+a）编写.proto文件，protobuf在其他文章中已经介绍了，这里就不详细介绍了。
+
+b）使用编译工具来编译.proto文件。
+
+c）启动一个server端，监听一个端口，等待client连接，通常用Netty构建
+
+d）启动一个client端，也是通过Netty构建，client与server建立TCP长连接，并发送请求。request和response都是HTTP2，通过Netty channel进行交互。
+
+grpc在这里的用处是创建一个client
+
+（2）handleConnectionChange
+
+含义：
+
+路径：
+
+    github.com/docker/docker/libcontainerd/remote_linux.go
+
+定义：
+
+    func (r *remote) handleConnectionChange() {
+        var transientFailureCount = 0
+        state := grpc.Idle
+        for {
+            //这是实验性API，等待容器连接状态改变
+            s, err := r.rpcConn.WaitForStateChange(context.Background(), state)
+            if err != nil {
+                break
+            }
+            state = s
+            logrus.Debugf("libcontainerd: containerd connection state change: %v", s)
+
+            //daemonPid!=-1时才执行下面操作，前面设置了remote.daemon=-1，因此，不执行下面操作。那么什么时候会设置！=-1呢？在运行容器化的libcontainerd时候，有可能会设置。所以这里暂时不详细分析了。
+            if r.daemonPid != -1 {
+                switch state {
+                case grpc.TransientFailure:
+                    // Reset state to be notified of next failure
+                    transientFailureCount++
+                    if transientFailureCount >= maxConnectionRetryCount {
+                        transientFailureCount = 0
+                        if utils.IsProcessAlive(r.daemonPid) {
+                            utils.KillProcess(r.daemonPid)
+                        }
+                        <-r.daemonWaitCh
+                        if err := r.runContainerdDaemon(); err != nil { //FIXME: Handle error
+                            logrus.Errorf("libcontainerd: error restarting containerd: %v", err)
+                        }
+                    } else {
+                        state = grpc.Idle
+                        time.Sleep(connectionRetryDelay)
+                    }
+                case grpc.Shutdown:
+                    // Well, we asked for it to stop, just return
+                    return
+                }
+            }
+        }
+    }
+
+（3）startEventsMonitor
+
+含义：
+
+    启动事件监控。
+
+路径：
+
+    github.com/docker/docker/libcontainerd/remote_linux.go
+
+定义：
+
+    func (r *remote) startEventsMonitor() error {
+        // 获得上一次事件时间戳
+        t := r.getLastEventTimestamp()
+
+        //转换为protobuf的时间戳
+        tsp, err := ptypes.TimestampProto(t)
+        if err != nil {
+            logrus.Errorf("libcontainerd: failed to convert timestamp: %q", err)
+        }
+        er := &containerd.EventsRequest{
+            Timestamp: tsp,
+        }
+
+        //获得事件
+        events, err := r.apiClient.Events(context.Background(), er)
+        if err != nil {
+            return err
+        }
+
+        //处理事件
+        go r.handleEventStream(events)
+        return nil
     }
 
 _______________________________________________________________________
