@@ -22,4 +22,4 @@ Linux内核namespace的相关知识
 
 
 _______________________________________________________________________
-[[返回docker-linux.md]](./docker-linux.md) 
+[[返回docker-linux.md]](../docker-linux.md) 
