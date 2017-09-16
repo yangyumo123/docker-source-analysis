@@ -1,7 +1,7 @@
-调用namespace的API
+C语言实现的namespace的API
 ==========================================================
 ## 简介
-namespace的API包括clone、setns以及unshare，还有/proc下的部分文件。
+在Linux中，C语言实现的namespace的API包括clone、setns以及unshare，还有/proc下的部分文件。
 
 6个namespace隔离分别对应6个参数：CLONE_NEWUTS、CLONE_NEWIPC、CLONE_NEWNS（因为mnt namespace是最早的隔离，所以它的名字比较特殊）、CLONE_NEWPID、CLONE_NEWNET、CLONE_NEWUSER。
 
@@ -70,7 +70,7 @@ namespace的API包括clone、setns以及unshare，还有/proc下的部分文件�
 ### 4. unshare
 含义：
 
-    unshare使当前进程退出指定类型的namespace，并加入到新创建的namespace。运行在原先的进程上，相当于跳出原先的namespace。
+    unshare使当前进程退出指定类型的namespace，并加入到新创建的namespace。运行在原先的进程上，相当于跳出原先的namespace。在Documentation/unshare.txt中有对unshare的详细描述。
 
 定义：
 

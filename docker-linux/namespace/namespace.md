@@ -24,8 +24,9 @@ user namespace是在Linux内核3.8才完成的。docker从1.10版本开始支持
 
 ## 目录
 1. [Linux内核中的namesapce数据结构](./namespace-struct.md)
-2. [调用namespace的API](./namespace-api.md)
-3. [每种namespace的详细分析](./namespace-analysis.md)
+2. [调用namespace的C语言API](./namespace-c-api.md)
+3. [调用namespace的Go语言API](./namespace-go-api.md)
+4. [每种namespace的详细分析](./namespace-analysis.md)
 
 
 _______________________________________________________________________
