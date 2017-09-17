@@ -186,22 +186,16 @@ Linux内核中的namesapce数据结构
 定义：
 
     struct net {
-        atomic_t		passive;	/* To decided when the network
-                            * namespace should be freed.
-                            */
-        atomic_t		count;		/* To decided when the network
-                            *  namespace should be shut down.
-                            */
+        atomic_t		passive;	/* To decided when the network namespace should be freed. */
+        atomic_t		count;		/* To decided when the network namespace should be shut down. */
     #ifdef NETNS_REFCNT_DEBUG
-        atomic_t		use_count;	/* To track references we
-                            * destroy on demand
-                            */
+        atomic_t		use_count;	/* To track references we destroy on demand */
     #endif
         spinlock_t		rules_mod_lock;
 
-        struct list_head	list;		/* list of network namespaces */
+        struct list_head	list;		    /* list of network namespaces */
         struct list_head	cleanup_list;	/* namespaces on death row */
-        struct list_head	exit_list;	/* Use only net_mutex */
+        struct list_head	exit_list;  	/* Use only net_mutex */
 
         struct user_namespace   *user_ns;	/* Owning user namespace */
 
@@ -215,17 +209,16 @@ Linux内核中的namesapce数据结构
     #endif
 
         struct sock 		*rtnl;			/* rtnetlink socket */
-        struct sock		*genl_sock;
+        struct sock		    *genl_sock;
 
         struct list_head 	dev_base_head;
         struct hlist_head 	*dev_name_head;
         struct hlist_head	*dev_index_head;
         unsigned int		dev_base_seq;	/* protected by rtnl_mutex */
-        int			ifindex;
+        int			        ifindex;
 
         /* core fib_rules */
         struct list_head	rules_ops;
-
 
         struct net_device       *loopback_dev;          /* The loopback */
         struct netns_core	core;

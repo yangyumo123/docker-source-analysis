@@ -356,7 +356,7 @@ setns也是一样，在创建pid namespace时，调用者进程不会进入新�
     私有挂载（private）
     不可绑定挂载（unbindable）
 
-传播事件的挂载对象称为共享挂载（例如，/lib）；接收传播事件的挂载对象称为从属挂载（例如，/bin。一般用于只读场景。从属挂载克隆的挂载对象也是从属挂载）；既不传播也不接收传播事件的挂载对象称为私有挂载（例如，/proc。默认所有挂载都是私有的）；不可绑定挂载（例如，/root）即不可以复制。
+传播事件的挂载对象称为共享挂载（例如，/lib。共享挂载克隆的挂载对象也是共享挂载）；接收传播事件的挂载对象称为从属挂载（例如，/bin。一般用于只读场景。从属挂载克隆的挂载对象也是从属挂载。）；既不传播也不接收传播事件的挂载对象称为私有挂载（例如，/proc。默认所有挂载都是私有的）；不可绑定挂载（例如，/root）即不可以复制。
 
 设置共享挂载的命令：
 
@@ -381,8 +381,77 @@ setns也是一样，在创建pid namespace时，调用者进程不会进入新�
 ### 5. net namespace
 含义：
 
+    net namespace提供网络资源的隔离，包括：网络设备、IPv4和IPv6协议栈、IP路由表、防火墙、/proc/net目录、/sys/class/net目录、端口等等。一个物理物理设备最多存在于一个net namespace中，但可以通过veth pair在不同的net namespace间创建通道，来通信。
+
+    一般情况下，物理网络设备最初分配在root namespace中。但是，可以被转移给新创建的net namespace。当新创建的net namespace释放时，该net namespace中的物理设备也会返回到root namespace中。
+
+    一般来说，我们不需要真正的网络隔离，我们需要在不同net namespace之间做通信。为此，容器的经典做法是创建一个veth pair，一端放在新的net namespace中，通常命名为eth0，另一端放在原先的net namespace中连接物理网络设备，再通过网桥把别的设备连接进来或者进行路由转发，以实现网络通信的目的。
+
+    在建立veth pair之前，新旧net namespace之间如何通信？它们通过管道（pipe）。
+    以dockerinit为例，docker daemon在宿主机上负责创建这个veth pair，通过netlink调用，把一端绑定到docker0网桥上，一端连接进新创建的net namespace进程中。建立过程中，docker daemon和dockerinit就通过pipe进行通信，当docker daemon完成veth pair的创建之前，dockerinit在管道的另一端循环等待，直到管道另一端传来docker daemon关于veth pair的信息，并关闭管道。dockerinit才结束等待，并把它的etho启动起来。
+
 示例：
 
+    可以在创建的时候指定参数：CLONE_NEWNET。也可以使用ip命令创建net namespace。下面使用ip命令来模拟创建net namespace的过程。
+    1.创建名称为my_ns的net namespace
+        # ip netns add my_ns
+        此时，ip程序做了两件事：创建一个默认的回环设备lo，并在/var/run/netns目录下绑定一个挂载点，保证新创建的net namespace中即使没有进程也不会被释放。
+    2.查看新创建的net namespace中的设备
+        # ip netns exec my_ns ip link list
+        1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        此时，lo是DOWN状态，还没有启动。
+
+        # ip netns exec my_ns ping 127.0.0.1
+        connect: Network is unreachable
+        此时，ping本地是不通的。
+    3.启动lo
+        # ip netns exec my_ns ip link set dev lo up
+        # ip netns exec my_ns ip link list
+        1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        此时，lo是UP状态，启动了。
+        # ip netns exec my_ns ping 127.0.0.1
+        PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.
+        64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.065 ms
+        64 bytes from 127.0.0.1: icmp_seq=2 ttl=64 time=0.080 ms
+        ...
+        此时，ping本地是通的。
+
+    4.创建veth pair
+        # ip link add veth0 type veth peer name veth1                    //在旧的net namespace中创建veth0，对端veth1
+        # ip link set veth1 netns my_ns                                  //把veth1设置到新的net namespace中
+        # ip netns exec my_ns ifconfig veth1 10.1.1.1/24 up              //为新的net namespace的veth1配置网络地址，并启动
+        # ifconfig veth0 10.1.1.2/24                                     //为旧的net namespace的veth0配置网络地址，
+    5.检查2个net namespace的veth pair是否相通
+        # ping 10.1.1.1                                                  //从旧的net namespace中ping新的net namespace
+        PING 10.1.1.1 (10.1.1.1) 56(84) bytes of data.
+        64 bytes from 10.1.1.1: icmp_seq=1 ttl=64 time=0.097 ms
+        64 bytes from 10.1.1.1: icmp_seq=2 ttl=64 time=0.097 ms
+
+        # ip netns exec my_ns ping 10.1.1.2                              //从新的net namespace中ping旧的net namespace
+        PING 10.1.1.2 (10.1.1.2) 56(84) bytes of data.
+        64 bytes from 10.1.1.2: icmp_seq=1 ttl=64 time=0.087 ms
+        64 bytes from 10.1.1.2: icmp_seq=2 ttl=64 time=0.071 ms
+    6.还可以查看route和iptables
+        # ip netns exec my_ns route
+        Kernel IP routing table
+        Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+        10.1.1.0        0.0.0.0         255.255.255.0   U     0      0        0 veth1
+
+        # ip netns exec my_ns iptables -nL
+        Chain INPUT (policy ACCEPT)
+        target     prot opt source               destination         
+
+        Chain FORWARD (policy ACCEPT)
+        target     prot opt source               destination         
+
+        Chain OUTPUT (policy ACCEPT)
+        target     prot opt source               destination 
+
+    7.删除新的net namespace
+        # ip netns delete my_ns
+        会卸载之前的挂载目录。如果net namespace中还有进程在运行，则等进程结束后销毁。
 
 _______________________________________________________________________
 [[返回namespace.md]](./namespace.md) 
