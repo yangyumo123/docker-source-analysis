@@ -28,14 +28,14 @@
                     return
             }
             switch os.Args[1] {
-            case "uts":
-                    uts()
+            case "run":
+                    run()
             default:
                     logrus.Errorf("wrong command")
                     return
             }
     }
-    func uts() {
+    func run() {
             logrus.Infof("Running %v", os.Args[2:])
             cmd := exec.Command(os.Args[2], os.Args[3:]...)
             cmd.Stdin = os.Stdin
@@ -452,6 +452,39 @@ setns也是一样，在创建pid namespace时，调用者进程不会进入新�
     7.删除新的net namespace
         # ip netns delete my_ns
         会卸载之前的挂载目录。如果net namespace中还有进程在运行，则等进程结束后销毁。
+
+### 6. user namespace
+含义：
+
+    user namespace主要隔离uid、gid、root目录、key、特殊权限等。一个普通用户的进程可以通过clone创建新的user namespace，并且在新的user namespace中的进程具有超级用户。即非root进程也可以创建user namespace，并且该进程在user namespace的里面可以被映射成root，并有root权限。
+    user namespace和pid namespace一样，也是树状结构。最上层是root namespace。
+
+示例：
+
+    1. 增加CLONE_NEWUSER参数
+    func user(){
+        ...
+        cmd.SysProcAttr = &syscall.SysProcAttr{
+            Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWIPC | syscall.CLONE_NEWPID | syscall.CLONE_NEWNS | syscall.CLONE_NEWUSER,
+        }
+        ...
+    }
+
+执行：
+
+    首先，查看宿主机的uid和gid：
+    # id
+    uid=0(root) gid=0(root) groups=0(root) 
+
+    然后，运行程序，创建新的user namespace：
+    # id                                                               //在user namespace内部
+    uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)         //内部看uid和gid都变成了65534，表示尚未与外部user namespace中的用户映射。
+
+    最后，进行内外用户映射，在/proc/[pid]/uid_map和/proc/[pid]/gid_map中写入对应的绑定信息，实现内外用户映射。格式：
+        ID-inside-ns   ID-outside-ns   length
+    上面的两个文件只能由拥有该user namespace中CAP_SETUID权限的进程写入一次，不允许修改。
+    写入的进程必须是该user namespace的父namespace或者子namespace。
+
 
 _______________________________________________________________________
 [[返回namespace.md]](./namespace.md) 
