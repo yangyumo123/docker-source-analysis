@@ -6,7 +6,7 @@ daemon启动的核心代码。
 ## start综述
 含义：
 
-    docker daemon启动。
+    docker daemon启动。重点研究容器的创建。
 
 路径：
 
@@ -32,7 +32,7 @@ daemon启动的核心代码。
             cli.commonFlags.TrustKey = filepath.Join(getDaemonConfDir(), cliflags.DefaultTrustKeyFile)
         }
 
-        //加载daemon client config。configFile是flag参数："--config-file"。下面详细介绍。
+        //加载daemon client config。configFile是flag参数："--config-file"。下面详细介绍。**************************
         cliConfig, err := loadDaemonCliConfig(cli.Config, flags, cli.commonFlags, *cli.configFile)
         if err != nil {
             return err
@@ -171,7 +171,7 @@ daemon启动的核心代码。
         //参数ServiceOptions前面已经介绍过了，是关于registry的参数。创建一个默认service对象，准备被安装到引擎中。
         registryService := registry.NewService(cli.Config.ServiceOptions)
 
-        //创建容器配置
+        //创建container配置信息，作为daemon.NewDaemon的参数传入。****************
         containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), cli.getPlatformRemoteOptions()...)
         if err != nil {
             return err
@@ -182,7 +182,7 @@ daemon启动的核心代码。
             <-stopc //等着daemonCli.start() 返回
         })
 
-        //启动daemon，这里是创建docker daemon的核心程序。在下一章节详细介绍创建daemon的过程。
+        //启动daemon，这里是创建docker daemon的核心程序。在下一章节详细介绍创建daemon的过程。*********************
         d, err := daemon.NewDaemon(cli.Config, registryService, containerdRemote)
         if err != nil {
             return fmt.Errorf("Error starting daemon: %v", err)
@@ -412,7 +412,7 @@ daemon启动的核心代码。
 ### 5. libcontainerd.New
 含义：
 
-    创建libcontainerd实例。
+    创建container配置信息，作为daemon.NewDaemon的参数传入。
 
 路径：
 
@@ -421,72 +421,78 @@ daemon启动的核心代码。
 参数：
 
     cli.getLibcontainerdRoot()      - /var/run/docker/libcontainerd
-    cli.getPlatformRemoteOptions()  - libcontainer配置
+    cli.getPlatformRemoteOptions()  - libcontainer配置，下面会详细解释。
 
 定义：
 
-    func New(stateDir string, options ...RemoteOption) (_ Remote, err error) {
+    //参数：stateDir="/var/run/docker/libcontainerd"， options=remote结构体。
+    func New(stateDir string, options ...RemoteOption) (_ Remote, err error){
         defer func() {
             if err != nil {
                 err = fmt.Errorf("Failed to connect to containerd. Please make sure containerd is installed in your PATH or you have specificed the correct address. Got error: %v", err)
             }
         }()
 
-        //创建remote
+        //创建remote结构体
         r := &remote{
-            stateDir:    stateDir,
-            daemonPid:   -1,
-            eventTsPath: filepath.Join(stateDir, eventTimestampFilename), // /var/run/docker/libcontainerd/event.ts
+            stateDir:    stateDir,                        // /var/run/docker/libcontainerd
+            daemonPid:   -1,                            
+            eventTsPath: filepath.Join(stateDir, eventTimestampFilename),  // /var/run/docker/libcontainerd/event.ts
         }
+        //将参数赋给新创建的remote结构体，分别调用参数的Apply方法。
         for _, option := range options {
-            if err := option.Apply(r); err != nil {   //传进来的参数要实现RemoteOptions接口的Apply(Remote)error方法。设置remote的参数，包括：rpcAddr, runtime, startDaemon, liveRestore, oomScore
+            if err := option.Apply(r); err != nil {
                 return nil, err
             }
         }
 
-        //创建/var/run/docker/libecontainerd目录，0700
+        //创建目录：/var/run/docker/libcontainerd，权限0700
         if err := sysinfo.MkdirAll(stateDir, 0700); err != nil {
             return nil, err
         }
 
-        //设置RPC地址：/var/run/docker/libcontainerd/docker-containerd.sock
+        //设置remote的rpcAddr参数，如果rpcAddr参数不存在，则设置为/var/run/docker/libcontainerd/docker-containerd.sock。前面参数部分已经设置了rpcAddr的值。
         if r.rpcAddr == "" {
             r.rpcAddr = filepath.Join(stateDir, containerdSockFilename)
         }
-
-        //如果设置了startDaemon=true，则运行容器daemon。那么什么时候会设置startDaemon=true呢？在github.com/docker/docker/cmd/dockerd/daemon_unix.go文件中的DaemonCli.getPlatformRemoteOptions方法中有一个判断：如果DaemonCli.Config.ContainerAddr为空时，则会设置startDaemon=true，即libcontainer也是以容器运行。在前面参数中已经提到Config.ContainerAddr参数默认为空，除非你通过命令行flag："--containerd"传入false值。正常情况下，不会运行容器的libcontainer，所以这里暂时不深入分析了。
+        //remote的startDaemon参数和前面rpcAddr参数类似，也在前面设置了。当cli.Config.ContainerdAddr值不存在，则设置remote的startDaemon参数为true。
         if r.startDaemon {
-            if err := r.runContainerdDaemon(); err != nil {
+            if err := r.runContainerdDaemon(); err != nil {     //创建docker-containerd，这是创建容器的核心程序，在下节中详细介绍。
                 return nil, err
             }
         }
 
-        // 不输出grpc重连日志。grpc是google的一个rpc框架
+        
+        // don't output the grpc reconnect logging
         grpclog.SetLogger(log.New(ioutil.Discard, "", log.LstdFlags))
         dialOpts := append([]grpc.DialOption{grpc.WithInsecure()},
             grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
                 return net.DialTimeout("unix", addr, timeout)
             }),
         )
-        //连接rpcAddr，返回连接
+        //下面是进行rpc调用。grpc是google的rpc框架，Dial是对rpcAddr拨号，返回一个连接conn。
         conn, err := grpc.Dial(r.rpcAddr, dialOpts...)
         if err != nil {
             return nil, fmt.Errorf("error connecting to containerd: %v", err)
         }
-        //根据返回的连接创建客户端。
+
+        //设置remote的rpcConn参数
         r.rpcConn = conn
+
+        //设置remote的apiClient参数
         r.apiClient = containerd.NewAPIClient(conn)
 
-        // 读/var/run/docker/event.ts文件中最后一个event的时间戳
+        // 获取上次事件的时间戳，读 /var/run/docker/libcontainerd/event.ts文件
         t := r.getLastEventTimestamp()
-        //把时间戳转换为google protobuf时间戳格式
+        //将上次事件时间戳写到protobuf结构中。
         tsp, err := ptypes.TimestampProto(t)
         if err != nil {
             logrus.Errorf("libcontainerd: failed to convert timestamp: %q", err)
         }
+        //设置remote的restoreFromTimestamp
         r.restoreFromTimestamp = tsp
 
-        //启动一个goroutine，
+        //处理连接变化的goroutine
         go r.handleConnectionChange()
 
         //启动事件监控
@@ -497,23 +503,194 @@ daemon启动的核心代码。
         return r, nil
     }
 
-（1）grpc
+### 5.1 grpc
 
 这里主要介绍一下grpc的原理和在docker中的使用。
 
-GRPC是google开源的一个高性能RPC框架，基于HTTP2协议，基于protobuf 3.x（高性能数据传输格式），基于Netty 4.x+。从开发角度说，你需要做以下步骤（以java为例）：
+    GRPC是google开源的一个高性能RPC框架，基于HTTP2协议，基于protobuf 3.x（高性能数据传输格式），基于Netty 4.x+。从开发角度说，你需要做以下步骤（以java为例）：
+        a）编写.proto文件，protobuf在其他文章中已经介绍了，这里就不详细介绍了。
+        b）使用编译工具来编译.proto文件。
+        c）启动一个server端，监听一个端口，等待client连接，通常用Netty构建
+        d）启动一个client端，也是通过Netty构建，client与server建立TCP长连接，并发送请求。request和response都是HTTP2，通过Netty channel进行交互。
 
-a）编写.proto文件，protobuf在其他文章中已经介绍了，这里就不详细介绍了。
 
-b）使用编译工具来编译.proto文件。
 
-c）启动一个server端，监听一个端口，等待client连接，通常用Netty构建
+### 5.2 参数cli.getPlatformRemoteOptions()
+含义：
 
-d）启动一个client端，也是通过Netty构建，client与server建立TCP长连接，并发送请求。request和response都是HTTP2，通过Netty channel进行交互。
+    实现RemoteOptions接口的结构体数组。
 
-grpc在这里的用处是创建一个client
+路径：
 
-（2）handleConnectionChange
+    cmd/dockerd/daemon_unix.go
+
+定义：
+
+    func (cli *DaemonCli) getPlatformRemoteOptions() []libcontainerd.RemoteOption {
+        opts := []libcontainerd.RemoteOption{
+            libcontainerd.WithDebugLog(cli.Config.Debug),                                  //定义容器的debug log是否对daemon有效。根据cli.Config.Debug的值设置remote结构体的debugLog参数。
+            libcontainerd.WithOOMScore(cli.Config.OOMScoreAdjust),
+        }
+        if cli.Config.ContainerdAddr != "" {
+            opts = append(opts, libcontainerd.WithRemoteAddr(cli.Config.ContainerdAddr))   //
+        } else {
+            opts = append(opts, libcontainerd.WithStartDaemon(true))
+        }
+        if daemon.UsingSystemd(cli.Config) {                                               //如果cli.Config.ExecOptions中包含"native.cgroupdriver"的值等于"systemd"，则执行下面操作。
+            args := []string{"--systemd-cgroup=true"}
+            opts = append(opts, libcontainerd.WithRuntimeArgs(args))
+        }
+        if cli.Config.LiveRestore {
+            opts = append(opts, libcontainerd.WithLiveRestore(true))
+        }
+        opts = append(opts, libcontainerd.WithRuntimePath(daemon.DefaultRuntimeBinary))
+        return opts
+    }
+
+（1）remote结构体
+
+    //libcontainerd/remote_linux.go
+    type remote struct {
+        sync.RWMutex
+        apiClient            containerd.APIClient
+        daemonPid            int
+        stateDir             string
+        rpcAddr              string
+        startDaemon          bool
+        closeManually        bool
+        debugLog             bool
+        rpcConn              *grpc.ClientConn
+        clients              []*client
+        eventTsPath          string
+        runtime              string
+        runtimeArgs          []string
+        daemonWaitCh         chan struct{}
+        liveRestore          bool
+        oomScore             int
+        restoreFromTimestamp *timestamp.Timestamp
+    }
+
+（2）根据cli.Config.Debug的值设置remote结构体的debugLog参数
+
+    func WithDebugLog(debug bool) RemoteOptions {
+        return debugLog(debug)
+    }
+    //debugLog实现RemoteOptions接口
+    type debugLog bool
+    func (d debugLog) Apply(r Remote) error {
+        if remote, ok := r.(*remote); ok {
+            remote.debugLog = bool(d)                   //设置remote结构体的debugLog参数
+            return nil
+        }
+        return fmt.Errorf("WithDebugLog options not supported for this remote")
+    }
+
+（3）根据cli.Config.OOMScoreAdjust的值设置remote结构体的oomScore参数
+
+    func WithOOMScore(score int) RemoteOptions {
+        return oomScore(score)
+    }
+    type oomScore int
+    func (o oomScore) Apply(r Remote) error {
+        if remote, ok:=r.(*remote); ok {
+            remote.oomScore = int(o)
+            return nil
+        }
+        return fmt.Errorf("WithOOMScore options not support for this remote")
+    }
+
+（4）当cli.Config.ContainerdAddr值存在，则根据cli.Config.ContainerdAddr的值设置remote结构体的rpcAddr参数
+
+    func WithRemoteAddr(addr string) RemoteOptions {
+        return rpcAddr(addr)
+    }
+    type rpcAddr string
+    func (a rpcAddr) Apply(r Remote) error {
+        if remote, ok:=r.(*remote); ok {
+            remote.rpcAddr=string(a)
+            return nil
+        }
+        return fmt.Errorf("WithRemoteAddr option not supported for this remote")
+    }
+
+    当cli.Config.ContainerdAddr值不存在，则设置remote的startDaemon参数为true。
+    func WithStartDaemon(start bool) RemoteOptions {
+        return startDaemon(start)
+    }
+    type startDaemon bool
+    func (s startDaemon) Apply(r Remote) error {
+        if remote, ok := r.(*remote) ok {
+            remote.startDaemon = bool(s)
+            return nil
+        }
+        return fmt.Errorf("WithStartDaemon options not supported for this remote")
+    }
+
+    注意：默认ContainerAddr为""，但是可以设置命令行flag："--containerd"。docker启动时就是设置了"--containerd"，因此，这里会设置startDaemon为true。即创建containerdDaemon。
+
+（5）如果cli options包含native.cgroupdriver=systemd，则返回true
+
+    //daemon/daemon_unix.go
+    func UsingSystemd(config *Config) bool {
+        return getCD(config) == cgroupSystemdDriver            //"systemd"
+    }
+    func getCD(config *Config) string {
+        for _, option := range config.ExecOptions {
+            key, val, err := parsers.ParseKeyValueOpt(option)
+            if err != nil || !strings.EqualFold(key, "native.cgroupdriver") {
+                continue
+            }
+            return val
+        }
+        return ""
+    }
+
+    如果UsingSystemd返回true，则使用"--systemd-cgroup=true"参数来设置remote的runtimeArgs参数
+    func WithRuntimeArgs(args []string) RemoteOption {
+        return runtimeArgs(args)
+    }
+    type runtimeArgs []string
+    func (rt runtimeArgs) Apply(r Remote) error {
+        if remote, ok:=r.(*remote); ok{
+            remote.runtimeArgs = rt
+            return nil
+        }
+        return fmt.Errorf("WithRuntimeArgs options not supported for this remote")
+    }
+
+（6）如果cli.Config.LiveRestore值为true，则设置remote的liveRestore参数为true
+
+    func WithLiveRestore(v bool) RemoteOption {
+        return liveRestore(v)
+    }
+    type liveRestore bool
+    func (l liveRestore) Apply(r Remote) error{
+        if remote,ok:=r.(*remote);ok{
+            remote.liveRestore=bool(l)
+            for _,c:=range remote.clients{
+                c.liveRestore=bool(l)
+            }
+            return nil
+        }
+        return fmt.Errorf("WithLiveRestore option not supported for this remote")
+    }
+
+（7）设置remote的runtime参数为"docker-runc"
+
+    func WithRuntimePath(rt string) RemoteOptions {
+        return runtimePath(rt)
+    }
+    type runtimePath string
+    func (rt runtimePath) Apply(r Remote) error {
+        if remote, ok:=r.(*remote); ok {
+            remote.runtime=string(rt)
+            return nil
+        }
+        return fmt.Errorf("WithRuntime option not supported for this remote")
+    }
+
+
+### 5.3 handleConnectionChange
 
 含义：
 
@@ -535,7 +712,7 @@ grpc在这里的用处是创建一个client
             state = s
             logrus.Debugf("libcontainerd: containerd connection state change: %v", s)
 
-            //daemonPid!=-1时才执行下面操作，前面设置了remote.daemon=-1，因此，不执行下面操作。那么什么时候会设置！=-1呢？在运行容器化的libcontainerd时候，有可能会设置。所以这里暂时不详细分析了。
+            //daemonPid!=-1时才执行下面操作，前面设置了remote.daemon=-1，但是在运行containerd的时候，有可能会设置-1。
             if r.daemonPid != -1 {
                 switch state {
                 case grpc.TransientFailure:
@@ -562,7 +739,7 @@ grpc在这里的用处是创建一个client
         }
     }
 
-（3）startEventsMonitor
+### 5.4 startEventsMonitor
 
 含义：
 
@@ -597,6 +774,8 @@ grpc在这里的用处是创建一个client
         go r.handleEventStream(events)
         return nil
     }
+
+
 
 _______________________________________________________________________
 [[返回docker-daemon.md]](./docker-daemon.md) 
