@@ -451,7 +451,7 @@ daemon启动的核心代码。
             return nil, err
         }
 
-        //设置remote的rpcAddr参数，如果rpcAddr参数不存在，则设置为/var/run/docker/libcontainerd/docker-containerd.sock。前面参数部分已经设置了rpcAddr的值。
+        //设置remote的rpcAddr参数，如果rpcAddr参数不存在，则设置为/var/run/docker/libcontainerd/docker-containerd.sock。
         if r.rpcAddr == "" {
             r.rpcAddr = filepath.Join(stateDir, containerdSockFilename)
         }
