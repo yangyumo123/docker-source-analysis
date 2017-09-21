@@ -6,7 +6,7 @@ containerd是docker容器标准化后的产物，本身是一个daemon，控制r
 containerd的命令行工具是"ctr"，一些操作命令如下：
 
     # ctr containers start redis /contaienrs/redis
-    # ctr contaienrs list
+    # ctr containers list
     ID                  PATH                STATUS              PROCESSES
     redis               /containers/redis   running             14063
 
