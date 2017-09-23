@@ -22,7 +22,7 @@
 ## 源码输出
 下面是第二次执行make的结果，已经存在镜像的情况下，就会省去中间下载镜像，下载依赖等步骤。
 
-第一次编译会生成完整的编译输出，包括下载镜像，下载依赖包等等，完整的输出请看参考文献：[[编译docker源码的完整输出]](../../reference/docker-build.md)。
+第一次编译会生成完整的编译输出，包括下载镜像，下载依赖包等等，完整的输出请看参考文献：[[编译docker源码的完整输出]](../reference/docker-build.md)。
 
     docker build  -t "docker-dev:HEAD" -f "Dockerfile" .
     Sending build context to Docker daemon 187.1 MB
@@ -191,7 +191,7 @@
 
 ## 分析编译过程
 ### 1. 创建bundles目录
-第一次编译会在当前路径创建bundles目录，用于存储编译后的二进制文件。详细请看参考文献的完整版：[[编译docker源码的完整输出]](../../reference/docker-build.md)
+第一次编译会在当前路径创建bundles目录，用于存储编译后的二进制文件。详细请看参考文献的完整版：[[编译docker源码的完整输出]](../reference/docker-build.md)
 
     mkdir bundles
 
@@ -538,7 +538,7 @@ binary-daemon的内容：
 
 
 ## 参考文献
-* [[编译docker源码的完整输出]](../../reference/docker-build.md)
+* [[编译docker源码的完整输出]](../reference/docker-build.md)
 
 _______________________________________________________________________
 [[返回README.md]](../README.md) 
