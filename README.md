@@ -8,9 +8,10 @@ docker source analysis for study, communication and practice.
 本项目分析的docker源码版本是：1.12.6。现在docker已经改名为moby。部分内容的详细说明放在参考文献中。
 
 ## 目录
-1. [docker-daemon](./docker-daemon/docker-daemon.md)
-2. [containerd](./containerd/containerd.md)
-3. [runC](./runc/runc.md)
-4. [docker-client](./docker-client/docker-client.md)
-5. [docker相关的知识](./docker-linux/docker-linux.md)
+1. [编译docker源码](./docker-build/docker-build.md)
+2. [docker-daemon](./docker-daemon/docker-daemon.md)
+3. [containerd](./containerd/containerd.md)
+4. [runC](./runc/runc.md)
+5. [docker-client](./docker-client/docker-client.md)
+6. [docker相关的知识](./docker-linux/docker-linux.md)
 
