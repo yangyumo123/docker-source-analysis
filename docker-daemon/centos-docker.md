@@ -170,7 +170,7 @@ docker daemon执行命令：/usr/bin/dockerd-current
 
     --add-runtime docker-runc=/usr/libexec/docker/docker-runc-current
     --default-runtime=docker-runc                                       //默认runtime
-    --exec-opt native.cgroupdriver=systemd                              //cgroup驱动方式
+    --exec-opt native.cgroupdriver=systemd                              //cgroup驱动方式，这里使用systemd，而不是原生的cgroups文件系统。
     --userland-proxy-path=/usr/libexec/docker/docker-proxy-current
     $OPTIONS                                                            //在/etc/sysconfig/docker中的参数，前面已经介绍了。
     $DOCKER_STORAGE_OPTIONS                                             //在/etc/sysconfig/docker-storage中的参数，前面已经介绍了。
