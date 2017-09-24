@@ -18,7 +18,7 @@ docker daemon的入口位置：github.com/docker/docker/cmd/dockerd.docker.go。
         //设置日志输出，stderr。
         logrus.SetOutput(stderr)
 
-        //flag参数合并，flag.CommandLine是目的，是docker自己写的一个包：github.com/docker/docker/pkg/mflg。将前面的FlagSet合并到该包的FlagSet中。
+        //flag参数合并，flag.CommandLine是目的，是docker自己写的一个包：github.com/docker/docker/pkg/mflg。将前面的daemonCli.commonFlags.FlagSet合并到该包的FlagSet中。
         flag.Merge(flag.CommandLine, daemonCli.commonFlags.FlagSet)
 
         //flag参数使用说明
@@ -60,7 +60,7 @@ docker daemon的入口位置：github.com/docker/docker/cmd/dockerd.docker.go。
         }
 
         if !stop {
-            //这里是daemonCli启动的核心代码。在下一节中详细分析。
+            //这里是docker daemon启动的核心代码。在下一节中详细分析。
             err = daemonCli.start()
             notifyShutdown(err)
             if err != nil {

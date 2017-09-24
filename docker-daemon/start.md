@@ -28,11 +28,13 @@ daemon启动的核心代码。
         cli.commonFlags.PostParse()
 
         //之前没有设置过TrustKey，因此这里设置：/etc/docker/key.json
+        //在前面的centos例子中，/etc/docker/key.json的内容如下：
+        //{"crv":"P-256","d":"-y8NC73lL3eHjYWA5PkeuLYXF12tMa_MInhvxRtEass","kid":"LFO2:F34B:M2US:PL24:Y6YH:NRJX:UNW2:GYCN:JLEX:CXNI:N2EZ:K3UK","kty":"EC","x":"tWe7PMJ0fEo6AgCl8S74iXEPwM43923DrtJfZZD-Mz4","y":"C1qlV1Yoy7fZL5vdN3tIxqvzlEBmiio0musfJLN4I3I"}
         if cli.commonFlags.TrustKey == "" {
             cli.commonFlags.TrustKey = filepath.Join(getDaemonConfDir(), cliflags.DefaultTrustKeyFile)
         }
 
-        //加载daemon client config。configFile是flag参数："--config-file"。下面详细介绍。**************************
+        //合并到config配置中，并验证config配置的参数合法性。Config、commonFlags和configFile都是前面介绍的daemonCli.Config的字段。
         cliConfig, err := loadDaemonCliConfig(cli.Config, flags, cli.commonFlags, *cli.configFile)
         if err != nil {
             return err
@@ -67,29 +69,31 @@ daemon启动的核心代码。
             }
         }
 
-        //进程退出后移除进程pid。
+        //进程退出后移除进程pid。cli.Pidfile的默认值是：/var/run/docker.pid，用户可以通过命令行参数："-p"或"--pidfile"来修改该默认值。
         if cli.Pidfile != "" {
+            //创建PIDFile，往/var/run/docker.pid中写pid。
             pf, err := pidfile.New(cli.Pidfile)
             if err != nil {
                 return fmt.Errorf("Error starting daemon: %v", err)
             }
             defer func() {
+                //daemon退出时删除PIDFile
                 if err := pf.Remove(); err != nil {
                     logrus.Error(err)
                 }
             }()
         }
 
-        //设置api server的Config配置信息。
+        //设置apiserver的Config配置信息。
         serverConfig := &apiserver.Config{
             Logging:     true,
-            SocketGroup: cli.Config.SocketGroup,   //socket组
+            SocketGroup: cli.Config.SocketGroup,   //socket组，默认值："docker"。
             Version:     dockerversion.Version,    //docker版本
             EnableCors:  cli.Config.EnableCors,    //是否允许跨域资源共享
             CorsHeaders: cli.Config.CorsHeaders,   //跨域资源共享的资源列表。
         }
 
-        //设置server的TLS。
+        //设置apiserver的TLS。
         if cli.Config.TLS {
             tlsOptions := tlsconfig.Options{
                 CAFile:   cli.Config.CommonTLSOptions.CAFile,
@@ -108,16 +112,16 @@ daemon启动的核心代码。
             serverConfig.TLSConfig = tlsConfig
         }
 
-        //客户端hosts
+        //设置socket绑定的hosts。
         if len(cli.Config.Hosts) == 0 {
             cli.Config.Hosts = make([]string, 1)
         }
 
-        //根据serverconfig创建api server
+        //根据serverconfig创建apiserver
         api := apiserver.New(serverConfig)
         cli.api = api
 
-        //如果设置了Config.Hosts，则执行下面操作。
+        //如果设置了Config.Hosts，则执行下面操作。默认Config.Hosts为空。
         for i := 0; i < len(cli.Config.Hosts); i++ {
             var err error
             if cli.Config.Hosts[i], err = opts.ParseHost(cli.Config.TLS, cli.Config.Hosts[i]); err != nil {
@@ -156,7 +160,7 @@ daemon启动的核心代码。
             }
             logrus.Debugf("Listener created for HTTP on %s (%s)", protoAddrParts[0], protoAddrParts[1])
 
-            //返回监听到的api server服务器
+            //返回监听的api server服务器
             api.Accept(protoAddrParts[1], ls...)
         }
 
@@ -165,13 +169,13 @@ daemon启动的核心代码。
             return err
         }
 
-        //TrustKeyPath就是/etc/docker/key.json
+        //TrustKeyPath=/etc/docker/key.json
         cli.TrustKeyPath = cli.commonFlags.TrustKey
 
         //参数ServiceOptions前面已经介绍过了，是关于registry的参数。创建一个默认service对象，准备被安装到引擎中。
         registryService := registry.NewService(cli.Config.ServiceOptions)
 
-        //创建container配置信息，作为daemon.NewDaemon的参数传入。****************
+        //创建containerd，containerd负责创建容器，管理容器生命周期，后面会详细介绍。
         containerdRemote, err := libcontainerd.New(cli.getLibcontainerdRoot(), cli.getPlatformRemoteOptions()...)
         if err != nil {
             return err
@@ -182,7 +186,7 @@ daemon启动的核心代码。
             <-stopc //等着daemonCli.start() 返回
         })
 
-        //启动daemon，这里是创建docker daemon的核心程序。在下一章节详细介绍创建daemon的过程。*********************
+        //启动daemon，这里是创建docker daemon的核心程序。在下一章节详细介绍创建daemon的过程。
         d, err := daemon.NewDaemon(cli.Config, registryService, containerdRemote)
         if err != nil {
             return fmt.Errorf("Error starting daemon: %v", err)
@@ -283,7 +287,7 @@ daemon启动的核心代码。
 ### 2. loadDaemonCliConfig
 含义：
 
-    合并到config配置中，并验证config配置的参数合法性。
+    合并到DaemonCli.Config配置中，并验证DaemonCli.Config配置的参数合法性。
 
 路径：
 
@@ -292,21 +296,21 @@ daemon启动的核心代码。
 定义：
 
     func loadDaemonCliConfig(config *daemon.Config, flags *flag.FlagSet, commonConfig *cliflags.CommonFlags, configFile string) (*daemon.Config, error) {
-        //将commonConfig中的参数添加到config中。
-        config.Debug = commonConfig.Debug
-        config.Hosts = commonConfig.Hosts
-        config.LogLevel = commonConfig.LogLevel
-        config.TLS = commonConfig.TLS
-        config.TLSVerify = commonConfig.TLSVerify
+        //将DaemonCli.commonFlags中的参数添加到DaemonCli.Config中。
+        config.Debug = commonConfig.Debug                                           //默认为false，用户可以通过命令行参数传入："--debug"来改变该默认值。
+        config.Hosts = commonConfig.Hosts                                           //默认为空串，用户可以通过命令行参数传入："-H"或"--hosts"来改变该默认值。如果为空，则不会通过parseDockerDaemonHost来验证socket绑定的主机。
+        config.LogLevel = commonConfig.LogLevel                                     //默认为info，用户可以通过命令行参数传入："-l"或"--log-level"来改变该默认值。
+        config.TLS = commonConfig.TLS                                               //默认为false，用户可以通过命令行参数传入："--tls"来改变该默认值。
+        config.TLSVerify = commonConfig.TLSVerify                                   //默认值由环境变量DOCKER_TLS_VERIFY来指定，用户可以通过命令行参数传入："--tlsverify"来改变该默认值。
         config.CommonTLSOptions = daemon.CommonTLSOptions{}
 
         if commonConfig.TLSOptions != nil {
-            config.CommonTLSOptions.CAFile = commonConfig.TLSOptions.CAFile
-            config.CommonTLSOptions.CertFile = commonConfig.TLSOptions.CertFile
-            config.CommonTLSOptions.KeyFile = commonConfig.TLSOptions.KeyFile
+            config.CommonTLSOptions.CAFile = commonConfig.TLSOptions.CAFile         //默认为dockerCertPath/ca.pem，用户可以通过命令行参数传入："--tlscacert"来改变该默认值。dockerCertPath是环境变量DOCKER_CERT_PATH的值或者是DOCKER_CONFIG的值。
+            config.CommonTLSOptions.CertFile = commonConfig.TLSOptions.CertFile     //默认为dockerCertPath/cert.pem，用户可以通过命令行参数传入："--tlscert"来改变该默认值。
+            config.CommonTLSOptions.KeyFile = commonConfig.TLSOptions.KeyFile       //默认为dockerCertPath/key.pem，用户可以通过命令行参数传入："--tlskey"来改变该默认值。
         }
 
-        //加载configFile的信息到config中。
+        //加载DaemonCli.configFile的信息到DaemonCli.Config中。默认值为空，用户可以通过命令行参数传入："--config-file"来改变该默认值。
         if configFile != "" {
             c, err := daemon.MergeDaemonConfigurations(config, flags, configFile)
             if err != nil {
@@ -319,12 +323,12 @@ daemon启动的核心代码。
             }
         }
 
-        //验证配置config，包括：config.DNS（DNS是否是有效ip地址），config.DNSSearch（DNS搜索域是否有效），config.Labels（标签是否有效），config.MaxConcurrentDownloads（是否超过了最大pull并发数量），config.MaxConcurrentUploads（是否超过了最大push并发数量）
+        //验证配置DaemonCli.Config，包括：config.DNS（DNS是否是有效ip地址），config.DNSSearch（DNS搜索域是否有效），config.Labels（标签是否有效），config.MaxConcurrentDownloads（是否超过了最大pull并发数量），config.MaxConcurrentUploads（是否超过了最大push并发数量）
         if err := daemon.ValidateConfiguration(config); err != nil {
             return nil, err
         }
 
-        // 验证是否设置TLSVerifyKey
+        // 验证是否设置TLSVerifyKey，其实TLSVerifyKey的值就是"tlsverify"
         if config.IsValueSet(cliflags.TLSVerifyKey) {
             config.TLS = true
         }
@@ -338,7 +342,8 @@ daemon启动的核心代码。
 ### 3. apiserver.New
 含义：
 
-    用指定config参数创建一个server对象，
+    用指定的serverConfig参数创建一个apiserver对象。
+
 路径：
 
     github.com/docker/docker/api/server/server.go
@@ -356,19 +361,17 @@ daemon启动的核心代码。
 
     创建一个registry service对象。
 
-路径：
-
-    github.com/docker/docker/registry/service.go
-
 定义：
 
+    //github.com/docker/docker/registry/service.go
     func NewService(options ServiceOptions) *DefaultService {
         return &DefaultService{
             config: newServiceConfig(options),
         }
     }
 
-    //创建service config
+    //创建service config，主要是设置命令行参数"--insecure-registry"指定的registry和官方默认的registry："docker.io"。
+    //github.com/docker/docker/registry/config.go
     func newServiceConfig(options ServiceOptions) *serviceConfig {
         // 本地默认是insecure registry
         options.InsecureRegistries = append(options.InsecureRegistries, "127.0.0.0/8")
@@ -381,7 +384,7 @@ daemon启动的核心代码。
             },
             V2Only: options.V2Only,
         }
-        // 解析"--insecure-registry"到CIDR和registry指定的配置中。
+        // 解析"--insecure-registry"到CIDR和registry指定的配置中。在前面介绍的centos例子中，在/etc/sysconfig/docker"配置文件中的OPTIONS中可以添加命令行参数："--insecure-registry"
         for _, r := range options.InsecureRegistries {
             // 解析CIDR
             _, ipnet, err := net.ParseCIDR(r)
@@ -398,7 +401,7 @@ daemon启动的核心代码。
             }
         }
 
-        // 配置 public registry.
+        // 配置 public registry。IndexName="docker.io"，作为默认的registry。
         config.IndexConfigs[IndexName] = &registrytypes.IndexInfo{
             Name:     IndexName,
             Mirrors:  config.Mirrors,
@@ -412,7 +415,7 @@ daemon启动的核心代码。
 ### 5. libcontainerd.New
 含义：
 
-    创建container配置信息，作为daemon.NewDaemon的参数传入。
+    创建libcontainerd，libcontainerd负责创建容器，管理容器生命周期，后面会详细说明。返回值也作为后面的daemon.NewDaemon的参数传入。
 
 路径：
 
@@ -435,7 +438,7 @@ daemon启动的核心代码。
 
         //创建remote结构体
         r := &remote{
-            stateDir:    stateDir,                        // /var/run/docker/libcontainerd
+            stateDir:    stateDir,                                         // /var/run/docker/libcontainerd
             daemonPid:   -1,                            
             eventTsPath: filepath.Join(stateDir, eventTimestampFilename),  // /var/run/docker/libcontainerd/event.ts
         }
@@ -451,30 +454,33 @@ daemon启动的核心代码。
             return nil, err
         }
 
-        //设置remote的rpcAddr参数，如果rpcAddr参数不存在，则设置为/var/run/docker/libcontainerd/docker-containerd.sock。
+        //设置remote的rpcAddr参数，如果rpcAddr参数不存在，则设置为/var/run/docker/libcontainerd/docker-containerd.sock，该socket文件是docker-containerd进程的监听socket。默认是不存在。
         if r.rpcAddr == "" {
             r.rpcAddr = filepath.Join(stateDir, containerdSockFilename)
         }
-        //remote的startDaemon参数和前面rpcAddr参数类似，也在前面设置了。当cli.Config.ContainerdAddr值不存在，则设置remote的startDaemon参数为true。
+        //默认设置startDaemon=true。这里创建docker-containerd进程，这是创建容器的核心程序，在下节中详细介绍。
         if r.startDaemon {
-            if err := r.runContainerdDaemon(); err != nil {     //创建docker-containerd，这是创建容器的核心程序，在下节中详细介绍。
+            if err := r.runContainerdDaemon(); err != nil {   
                 return nil, err
             }
         }
 
         
-        // don't output the grpc reconnect logging
+        // 不输出grpc重连日志
         grpclog.SetLogger(log.New(ioutil.Discard, "", log.LstdFlags))
         dialOpts := append([]grpc.DialOption{grpc.WithInsecure()},
             grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
                 return net.DialTimeout("unix", addr, timeout)
             }),
         )
-        //下面是进行rpc调用。grpc是google的rpc框架，Dial是对rpcAddr拨号，返回一个连接conn。
+
+        //下面是dockerd对docker-containerd的rpc调用。Dial是对rpcAddr（/var/run/docker/libcontainerd/docker-containerd.sock）拨号，返回一个连接conn。
         conn, err := grpc.Dial(r.rpcAddr, dialOpts...)
         if err != nil {
             return nil, fmt.Errorf("error connecting to containerd: %v", err)
         }
+
+        //后面做的事情都是在监听docker-containerd进程的事件，连接情况等。
 
         //设置remote的rpcConn参数
         r.rpcConn = conn
@@ -518,7 +524,7 @@ daemon启动的核心代码。
 ### 5.2 参数cli.getPlatformRemoteOptions()
 含义：
 
-    实现RemoteOptions接口的结构体数组。
+    实现RemoteOptions接口的结构体数组，即实现了Apply方法，这些方法在后面会被调用。
 
 路径：
 
@@ -531,12 +537,12 @@ daemon启动的核心代码。
             libcontainerd.WithDebugLog(cli.Config.Debug),                                  //定义容器的debug log是否对daemon有效。根据cli.Config.Debug的值设置remote结构体的debugLog参数。
             libcontainerd.WithOOMScore(cli.Config.OOMScoreAdjust),
         }
-        if cli.Config.ContainerdAddr != "" {
-            opts = append(opts, libcontainerd.WithRemoteAddr(cli.Config.ContainerdAddr))   //
+        if cli.Config.ContainerdAddr != "" {                                               //默认为空
+            opts = append(opts, libcontainerd.WithRemoteAddr(cli.Config.ContainerdAddr))   
         } else {
             opts = append(opts, libcontainerd.WithStartDaemon(true))
         }
-        if daemon.UsingSystemd(cli.Config) {                                               //如果cli.Config.ExecOptions中包含"native.cgroupdriver"的值等于"systemd"，则执行下面操作。
+        if daemon.UsingSystemd(cli.Config) {                                               //如果cli.Config.ExecOptions中包含"native.cgroupdriver=systemd"，则执行下面操作。在前面的centos例子中，设置了"native.cgroupdriver=systemd"。
             args := []string{"--systemd-cgroup=true"}
             opts = append(opts, libcontainerd.WithRuntimeArgs(args))
         }
@@ -626,7 +632,7 @@ daemon启动的核心代码。
         return fmt.Errorf("WithStartDaemon options not supported for this remote")
     }
 
-    注意：默认ContainerAddr为""，但是可以设置命令行flag："--containerd"。docker启动时就是设置了"--containerd"，因此，这里会设置startDaemon为true。即创建containerdDaemon。
+    注意：默认ContainerAddr为""，但是可以设置命令行flag："--containerd"来改变默认值。在前面的centos例子中，没有设置"--containerd"，即会设置startDaemon=true，为后面执行docker-containerd做准备。
 
 （5）如果cli options包含native.cgroupdriver=systemd，则返回true
 
@@ -658,7 +664,7 @@ daemon启动的核心代码。
         return fmt.Errorf("WithRuntimeArgs options not supported for this remote")
     }
 
-（6）如果cli.Config.LiveRestore值为true，则设置remote的liveRestore参数为true
+（6）如果cli.Config.LiveRestore值为true，则设置remote的liveRestore参数为true。LiveRestore表示当容器正在运行时，docker是否允许在线恢复，默认是false。
 
     func WithLiveRestore(v bool) RemoteOption {
         return liveRestore(v)
@@ -693,6 +699,8 @@ daemon启动的核心代码。
 ### 5.3 handleConnectionChange
 
 含义：
+
+    处理连接变化。这是实验性API。
 
 路径：
 

@@ -44,8 +44,8 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
 
         //DaemonCli有3个重要参数：Config，commonFlags和configFile。
         return &DaemonCli{
-            Config:      daemonConfig,
-            commonFlags: cliflags.InitCommonFlags(),  //下面详细介绍
+            Config:      daemonConfig,                
+            commonFlags: cliflags.InitCommonFlags(),  //后面会详细介绍
             configFile:  configFile,
         }
     }
@@ -200,7 +200,7 @@ Go语言特性：全局var，全局const和init函数在main之前执行。详�
 （2）InstallFlags
 含义：
 
-    添加flag参数到Go原生的CommandLine中。随后调用flag.Parse解析命令行传入的flag参数。
+    添加flag参数到docker自己的github.com/docker/docker/pkg/mflag包中的CommandLine中。随后调用flag.Parse解析命令行传入的flag参数。
 
 路径：
 
