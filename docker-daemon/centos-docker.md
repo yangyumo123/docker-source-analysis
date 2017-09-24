@@ -193,6 +193,43 @@ docker daemon执行命令：/usr/bin/dockerd-current
             $BLOCK_REGISTRY \
             $INSECURE_REGISTRY
 
+## docker相关目录
+运行一个容器，会在/var/run/docker/libcontainerd目录下生成容器相关目录，例如：
+
+    [root@localhost libcontainerd]# ls -l /var/run/docker/libcontainerd/
+    total 8
+    drwx------. 2 root root 100 Sep 24 18:52 89b3394e90307419ee1bf3d658028074f576f047c80a9a3e6c18fb0483cf6455
+    drwxr-xr-x. 3 root root  80 Sep 24 18:50 containerd
+    -rw-------. 1 root root   4 Sep 24 17:15 docker-containerd.pid       //docker-containerd的进程pid文件
+    srw-rw----. 1 root root   0 Sep 24 17:15 docker-containerd.sock      //docker-containerd的监听socket文件
+    -rw-------. 1 root root  30 Sep 24 17:31 event.ts                    //事件文件
+
+其中，89b3394e90307419ee1bf3d658028074f576f047c80a9a3e6c18fb0483cf6455目录是以容器id为名创建的，该目录下面包含：
+
+    -rw-r--r--. 1 root root 19935 Sep 24 17:31 config.json
+    prwx------. 1 root root     0 Sep 24 17:31 init-stdin
+    prwx------. 1 root root     0 Sep 24 17:31 init-stdout
+
+config.json是创建容器的配置文件。详细请看参考文献：[[config.json]](../reference/config-json.md)
+
+init-stdin是标准输入，init-stdout是标准输出。
+
+containerd目录是docker-containerd创建的，包含：
+
+    [root@localhost containerd]# ls -l /var/run/docker/libcontainerd/containerd
+    total 4
+    drwxr-xr-x. 3 root root 100 Sep 24 18:51 89b3394e90307419ee1bf3d658028074f576f047c80a9a3e6c18fb0483cf6455
+    -rwxr-xr-x. 1 root root 149 Sep 24 17:31 events.log
+
+containerd目录中也有个以容器id命名的目录89b3394e90307419ee1bf3d658028074f576f047c80a9a3e6c18fb0483cf6455，该目录下包含;
+
+    drwxr-xr-x. 2 root root 200 Sep 24 18:58 init          //容器初始化生成的一些文件
+    -rw-r--r--. 1 root root 301 Sep 24 17:31 state.json    //容器状态文件
+
+
+## 参考文献：
+* [[config.json]](../reference/config-json.md)
+
 _______________________________________________________________________
 [[返回docker-daemon.md]](./docker-daemon.md) 
 
