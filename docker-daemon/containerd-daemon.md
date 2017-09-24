@@ -1,7 +1,7 @@
 创建containerd daemon
 ==================================================
 ## 简介
-前面介绍了启动过程，当设置了"--containerd"参数时，将创建并启动containerd daemon。
+创建并启动containerd daemon进程，二进制文件是docker-containerd。
 
 ## 入口
 含义：
@@ -76,7 +76,7 @@
             return err
         }
 
-        // 设置args参数。
+        // 设置docker-containerd进程使用的args参数。
         args := []string{
             "-l", fmt.Sprintf("unix://%s", r.rpcAddr),                           //docker-containerd进程的rpc调用地址，取值：/var/run/docker/libcontianerd/docker-containerd.sock
             "--shim", "docker-containerd-shim",                                  //docker-containerd进程在启动后会创建docker-containerd-shim进程，该进程实现runC，实现容器创建，容器周期管理。
@@ -105,13 +105,21 @@
             logrus.Debugf("libcontainerd: runContainerdDaemon: runtimeArgs: %s", args)
         }
 
-        //创建命令，即创建Cmd结构体，参数：命令名称-containerdBinary="docker-containerd"，参数-args。为后面执行docker-containerd命令做准备。
+        //至此，默认的args包括：
+        // -l=unix:///var/run/docker/libcontianerd/docker-containerd.sock
+        // --shim=docker-containerd-shim
+        // --metrics-interval=0
+        // --start-timeout=2m
+        // --state-dir=/var/run/docker/libcontainerd/containerd
+        // --runtime docker-runc
+
+        //创建命令，即创建Cmd结构体，包含：命令名称（containerdBinary="docker-containerd"），参数（args）。为后面执行docker-containerd命令做准备。
         cmd := exec.Command(containerdBinary, args...)
 
         // 重定向containerd logs到docker logs
         cmd.Stdout = os.Stdout
         cmd.Stderr = os.Stderr
-        cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}
+        cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}  //dockerd是docker-containerd的父进程，这里允许父进程dockerd死了以后给子进程docker-containerd发送SIGKILL信号。
         cmd.Env = nil
         // clear the NOTIFY_SOCKET from the env when starting containerd
         for _, e := range os.Environ() {
@@ -120,10 +128,11 @@
             }
         }
 
-        //执行docker-containerd命令
+        //执行docker-containerd命令，创建docker-containerd进程。
         if err := cmd.Start(); err != nil {
             return err
         }
+
         logrus.Infof("libcontainerd: new containerd process, pid: %d", cmd.Process.Pid)
         if err := setOOMScore(cmd.Process.Pid, r.oomScore); err != nil {
             utils.KillProcess(cmd.Process.Pid)
@@ -147,7 +156,7 @@
 
 含义：
 
-    执行命令。
+    执行docker-containerd命令。
 
 路径：
 
@@ -155,10 +164,7 @@
 
 定义：
 
-    // Start starts the specified command but does not wait for it to complete.
-    //
-    // The Wait method will return the exit code and release associated resources
-    // once the command exits.
+    // 启动docker-containerd进程
     func (c *Cmd) Start() error {
         if c.lookPathErr != nil {
             c.closeDescriptors(c.closeAfterStart)
@@ -187,6 +193,7 @@
             }
         }
 
+        //设置stdin、stdout、stderr文件描述符到childFiles中。
         type F func(*Cmd) (*os.File, error)
         for _, setupFd := range []F{(*Cmd).stdin, (*Cmd).stdout, (*Cmd).stderr} {
             fd, err := setupFd(c)
@@ -200,11 +207,12 @@
         c.childFiles = append(c.childFiles, c.ExtraFiles...)
 
         var err error
+        //启动docker-containerd进程
         c.Process, err = os.StartProcess(c.Path, c.argv(), &os.ProcAttr{
             Dir:   c.Dir,
             Files: c.childFiles,
             Env:   c.envv(),
-            Sys:   c.SysProcAttr,
+            Sys:   c.SysProcAttr,    //包含可以处理SIGKILL信号
         })
         if err != nil {
             c.closeDescriptors(c.closeAfterStart)

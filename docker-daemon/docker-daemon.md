@@ -8,8 +8,8 @@ docker daemon是docker的服务端，对应的二进制文件是dockerd。提供
 2. [初始化](./init.md)
 3. [入口](./main.md)
 4. [启动](./start.md)
-5. [创建containerd](./containerd-daemon.md)
-6. [创建daemon](./newDaemon.md)
+5. [创建docker-containerd](./containerd-daemon.md)
+6. [创建dockerd](./newDaemon.md)
 
 _______________________________________________________________________
 [[返回README.md]](../README.md) 
