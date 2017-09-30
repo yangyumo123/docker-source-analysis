@@ -1,7 +1,7 @@
 每种namespace的详细分析
 ===================================================
 ## 简介
-这里介绍Go语言中namespace隔离的实现方法。我们需要下载一个库：go get github.com/Sirupsen/logrus。
+这里介绍Go语言中namespace隔离的实现方法。
 
 ## 1. uts namespace
 含义：

@@ -295,7 +295,7 @@ containerd-shim
             }
 
         } else {
-            //create
+            //create容器，
             args = append(args, "create",
                 "--bundle", p.bundle,
                 "--console", p.consolePath,
@@ -320,7 +320,7 @@ containerd-shim
         // 设置SysProcAttr
         cmd.SysProcAttr = setPDeathSig()
 
-        //启动
+        //启动容器
         if err := cmd.Start(); err != nil {
             if exErr, ok := err.(*exec.Error); ok {
                 if exErr.Err == exec.ErrNotFound || exErr.Err == os.ErrNotExist {

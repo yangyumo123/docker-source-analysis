@@ -24,7 +24,7 @@ cgroups术语
     cpuacct：生成cgroup中task对cpu资源使用情况的报告。
     cpuset：为cgroup中的task分配独立的cpu（多处理器系统）。
     devices：开启或关闭cgroup中task对设备的访问。
-    freezer：挂起或恢复cgrou中的task。
+    freezer：挂起或恢复cgroup中的task。
     memory：设置cgroup中task对内存使用量的限额，并生成task对内存使用情况的报告。
     perf-event：对cgroup中task进行统一的性能测试。
     net_cls：对cgroup中数据包进行流量控制。

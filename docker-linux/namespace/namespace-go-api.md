@@ -1,7 +1,7 @@
 Go语言实现的namespace的API
 ==========================================================
 ## 简介
-Go语言的库：github.com/Sirupsen/logrus，实现了namespace隔离的高层实现。syscall库是namespace的系统调用底层实现。
+Go语言的库：syscall库是namespace的系统调用底层实现。
 
 6个namespace隔离分别对应6个参数：CLONE_NEWUTS、CLONE_NEWIPC、CLONE_NEWNS（因为mnt namespace是最早的隔离，所以它的名字比较特殊）、CLONE_NEWPID、CLONE_NEWNET、CLONE_NEWUSER。
 

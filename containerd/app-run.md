@@ -106,7 +106,7 @@ app.Run
         }
 
         //返回命令行的args参数
-        args := context.Args()
+        args := context.Args()  //默认为空
         if args.Present() {     //如果存在args，则Present返回true
             name := args.First()
             c := a.Command(name)
