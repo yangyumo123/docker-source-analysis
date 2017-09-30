@@ -20,7 +20,7 @@
             HelpName:     path.Base(os.Args[0]),   //help命令时的名字。
             Usage:        "A new cli application", //使用说明，后面会被重新设置为"High performance container daemon"。
             UsageText:    "",                      //覆盖help的Usage段。
-            Version:      "0.0.0",                 //程序版本，后面会被重新设置。
+            Version:      "0.0.0",                 //程序版本，后面会被重新设置，设置为containerd的git版本和gitcommit号。
             BashComplete: DefaultAppComplete,      //打印子命令列表。
             Action:       helpCommand.Action,      //没有指定子命令时执行该函数，后面会注册该函数的运行逻辑。
             Compiled:     compileTime(),           //程序完成时间。
@@ -40,47 +40,45 @@
 定义：
 
     type App struct {
-        // The name of the program. Defaults to path.Base(os.Args[0])
+        // 程序的名字。默认是path.Base(os.Args[0])
         Name string
-        // Full name of command for help, defaults to Name
+        // help命令的完整名字，默认等于Name
         HelpName string
-        // Description of the program.
+        // 程序的描述
         Usage string
-        // Text to override the USAGE section of help
+        // 覆盖help命令中USAGE段的文本
         UsageText string
-        // Description of the program argument format.
+        // argument格式的描述
         ArgsUsage string
-        // Version of the program
+        // 程序版本
         Version string
-        // List of commands to execute
+        // 执行的命令列表
         Commands []Command
-        // List of flags to parse
+        // flags列表
         Flags []Flag
-        // Boolean to enable bash completion commands
+        // 是否支持bash命令补全
         EnableBashCompletion bool
-        // Boolean to hide built-in help command
+        // 是否隐藏内置的help命令
         HideHelp bool
-        // Boolean to hide built-in version flag and the VERSION section of help
+        // 是否隐藏内置version flag和help中的VERSION段
         HideVersion bool
-        // An action to execute when the bash-completion flag is set
+        // 当设置bash-completion flag时，执行的函数
         BashComplete func(context *Context)
-        // An action to execute before any subcommands are run, but after the context is ready
-        // If a non-nil error is returned, no subcommands are run
+        // 在subcommands运行之前，context准备好之后执行的函数。non-nil error表示没有运行subcommands。
         Before func(context *Context) error
-        // An action to execute after any subcommands are run, but after the subcommand has finished
-        // It is run even if Action() panics
+        // 所有subcommands运行之后，finished之前执行的函数。
         After func(context *Context) error
-        // The action to execute when no subcommands are specified
+        // 当没有指定subcommands时，执行的函数。
         Action func(context *Context)
-        // Execute this function if the proper command cannot be found
+        // 如果没有找到合适的命令，则执行这个函数。
         CommandNotFound func(context *Context, command string)
         // Execute this function, if an usage error occurs. This is useful for displaying customized usage error messages.
         // This function is able to replace the original error messages.
         // If this function is not set, the "Incorrect usage" is displayed and the execution is interrupted.
         OnUsageError func(context *Context, err error, isSubcommand bool) error
-        // Compilation date
+        // 编译时间
         Compiled time.Time
-        // List of all authors who contributed
+        // 贡献者列表
         Authors []Author
         // Copyright of the binary if any
         Copyright string
